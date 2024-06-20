@@ -1,0 +1,16 @@
+**/__pycache__/**
+
+/runs
+/data/
+/files/
+
+.ipynb_checkpoints
+/.vscode
+/.env
+/.config
+
+/net/experiments/**/*.json
+lsf.*
+/runs
+/experiment
+/.idea
