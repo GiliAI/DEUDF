@@ -1,0 +1,106 @@
+{
+    "name"  : {"concat":["Displace_Siren_", "replace:name", "_phased_scaledTanh_yes_act_yes_baseLoss_yes_udf_unsupervise_newinter_estigt"]},
+    "logger" : [
+        {
+            "type" : "Tensorboard",
+            "exclude" : ["mesh.*", "pointcloud.*","enhance_.*"]
+        },
+        {
+            "type" : "File",
+            "use_step" : true,
+            "include" : ["mesh_.*","code_base", "pointcloud.*", "levelset_.*", "contour_.*", "normal_.*"]
+        },
+        {
+            "type" : "File",
+            "use_step" : true,
+            "include" : ["extra_.*"]
+        }
+    ],
+    "tasks" : [
+        {
+            "type":"EstiTrain", "name":"Train","epochs":60, "learning_rate":1e-4,
+            "isEncoding": true,
+            "batch_size": 4,
+            "phase": {
+                "residual": [[1,0.0]],
+                "base": [[0.4, 0.5],[1, 0.0]]},
+            "overwrite": true,
+            "openTest":false,
+            "additionalTrain":false,
+            "extraEpoch":60,
+            "zeroCoordsTrain":true,
+            "update_checkpoint": 20, "resume_from": "Train_latest.ckpt"
+        }
+    ],
+    "network" : {
+        "type" : "Displacement",
+        "use_tanh": true,
+        "freeze_base" :  false,
+        "offset_base" : 0.05,
+        "detach_gradient" : false,
+        "offset_max" : 0.05,
+        "close_surface_activation": true,
+        "activation_threshold": 0.01,
+        "residual" :
+            {
+                "type" : "Siren",
+                "omega": 120
+            },
+        "base":
+            {
+                "type" : "Siren",
+                "omega" : 60
+            }
+    },
+    "loss" : {"type":"UdfAbs","originInter":true,
+              "base_sdf": [[1.0, 400]], 
+              "base_normal": [[1.0,0]],
+              "base_normal_lr": [[1.0, 40]],
+              "base_grad": [[1.0, 10]],
+              "base_grad_lr":  [[1.0, 10]],
+              "base_inter": [[1.0, 50]],
+
+              "sdf" :[[1.0,0]],
+              "normal": [[1.0,0]],
+              "normal_lr": [[1.0,0]],
+              "grad": [[1.0,0]],
+              "grad_lr": [[1.0,0]],
+              "inter":[[1.0,0]],
+
+              "zero_base":[[1.0,0]],
+              "zero_dis":[[1.0,0]],
+
+              "offsetR":0.01,
+              "offsetRW": [[0.4, 1.0],[1.0,0.2]],
+
+              "base_hessian":[[1.0, 0.0]],
+              "hessian":[[1.0,0.0]]
+              },
+   "data" :  {
+    "type" : "ScPointcloud",
+    "hasgtnormal":false,
+    "path" : {"concat":["data/3dscene/","replace:name",".ply"]},
+    "num_points" : 300000,
+    "train_epoch_points" : 2000000,
+    "factor_off_surface" : 0.5,
+    "offset" : 0.003,
+    "batch_size" : 2048,
+    "pointcloud_size" : 0,
+    "keep_aspect_ratio" : true,
+    "bbox_size": 2.0,
+    "augment_data": false,
+    "sphere_normalization":true,
+    "flip_normal" : false,
+    "padding" : 0,
+    "do_normalize": true,
+    "freq_sample_zero" : 0
+}   ,
+    "evaluator" : [
+        {"type":"Contour", "axis":0, "frequency": 10,"resolution":500, "name":"levelset_X", "attributes":["sdf","residual","base"]},
+        {"type":"Contour", "axis":1, "frequency": 10,"resolution":500, "name":"levelset_Y", "attributes":["sdf","residual","base"]},
+        {"type":"Contour", "axis":2, "frequency": 10,"resolution":500, "name":"levelset_Z", "attributes":["sdf","residual","base"]},
+        {"type":"Scalar","name":"scalar", "attributes" : ["base_sdf_loss","base_grad0_loss","base_grad_loss","base_inter_loss","base_normal_loss","sdf_loss","grad_loss","grad0_loss","inter_loss","normal_loss","zero_base_loss","zero_dis_loss","base_grad_lr_loss","base_normal_lr_loss","grad_lr_loss","normal_lr_loss","offsetRW"]},
+        {"type":"Mesh", "name":"mesh_base_HighRes", "frequency":60, "compute_chamfer":true, "resolution":512, "attribute":"base","threshold":0.003,"another":true,"isCut":false}
+    ]
+}
+
