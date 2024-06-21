@@ -1,7 +1,5 @@
 **/__pycache__/**
 
-/runs
-/data/
 /files/
 
 .ipynb_checkpoints
@@ -9,8 +7,6 @@
 /.env
 /.config
 
-/net/experiments/**/*.json
 lsf.*
-/runs
 /experiment
 /.idea
