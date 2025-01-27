@@ -1,4 +1,4 @@
-## python运行
+## The source code is coming soon
 The path of 3D model is edited in .json file\
 Default filetype is .ply
 ```
