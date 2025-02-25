@@ -9,9 +9,9 @@ python net/classes/runner.py net/experiments/displacement_benchmark/ablation/abl
 
 We now release main code of our algorithm. 
 
-# Install
+## Install
 
-## Preparation
+## Prepare
 We also provide the instructions for training your own data in the following.
 
 ### Data
