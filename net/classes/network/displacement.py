@@ -1,6 +1,5 @@
 from network.network import Network
 from network.siren import gradient
-from network.sirenudf import MySoftplus
 import torch
 import torch.nn.functional as F
 
@@ -22,7 +21,6 @@ class Displacement(Network):
     def _initialize(self):
         self.iteration = 0
         self.epoch = 0
-        self.lastActive = MySoftplus(betar=1e4,betal=100,threshold=1)
         if self.freeze_base and self.base is not None:
              self.base.requires_grad_(False)
 
