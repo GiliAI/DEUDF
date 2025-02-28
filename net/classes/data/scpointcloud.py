@@ -161,7 +161,7 @@ class ScPointcloud(CDataset):
         on_surface_mask = self.enhance_mask[rand_idcs, :]
         on_surface_nearest = torch.cat([on_surface_coords,on_surface_normals],dim=-1)
 
-        offset = (torch.rand((on_surface_normals.shape[0],1)))*self.offset
+        offset = (1-torch.rand((on_surface_normals.shape[0],1)))*self.offset
         on_suface_coords_l = on_surface_coords -  offset.repeat(1,3)*on_surface_normals
         on_suface_coords_r = on_surface_coords +  offset.repeat(1,3)*on_surface_normals
         
