@@ -1,4 +1,7 @@
 import sys
+# sys.path.append('/home/xz/reposotories/Unsigned_Marching_Cubes-1.0')
+# from evaluate_custom import Evaluator as Evaluator_ours
+# from Unsigned_Marching_Cubes.evaluate_custom import Evaluator as Evaluator_ours
 from DCUDF.dcudf.mesh_extraction import dcudf
 from DCUDF.dcudf.A_evaluate_custom_test import Evaluator as Extractor
 from typing import Dict
@@ -9,6 +12,7 @@ from .helper import get_surface_high_res_mesh
 from task.chamfer import Compute_Chamfer,show_Sigmas
 import trimesh
 from evaluator.optimize_A import getMeshUDF
+from DualMeshUDF import extract_mesh
 
 def calUdf(query_func,input_points,_batch_size):
     all_input_points = input_points.reshape(-1,3)
@@ -51,9 +55,56 @@ class Mesh(Evaluator):
         self.compute_chamfer : bool = False
         self.threshold : float = 0.005
         self.another : bool = False
-        self.isCut : bool = True
+        self.isCut : bool = False
+        self.dmudf : bool = False
+        self.meshudf : bool = False
         super().__init__(config)
         self.attributes.append(self.attribute)
+
+    def query_func(self, x, pd=True, **kwargs):
+        target_shape = list(x.shape)
+        pts = x.reshape(-1, 3)
+        if isinstance(pts, np.ndarray):
+            pts = torch.from_numpy(pts).cuda()
+        input = pts.reshape(-1, pts.shape[-1]).float()
+        d = self.evaluate_network(input, fea=None, **kwargs)[self.attribute]
+        target_shape[-1] = 1
+        d = d.reshape(target_shape)
+        if pd:
+            d = d.detach().cpu().numpy()
+        
+        return d
+    def grad_func(self, x, **kwargs):
+        
+        target_shape = list(x.shape)
+
+        x = torch.tensor(x)
+        x.requires_grad_(True)
+        input = x.reshape(-1, x.shape[-1]).float().cuda()
+        y = self.query_func(input, pd=False, **kwargs)
+
+        y.requires_grad_(True)
+        # udf_p = y.detach()
+
+        d_output = torch.ones_like(y, requires_grad=True, device=y.device)
+        gradients = torch.autograd.grad(
+            outputs=y,
+            inputs=x,
+            grad_outputs=d_output,
+            create_graph=True,
+            retain_graph=True,
+            only_inputs=True)[0]
+        
+        grad_p = gradients.reshape(target_shape).detach().cpu().numpy()
+        target_shape[-1] = 1
+        udf_p = y.reshape(target_shape).detach().cpu().numpy()
+        
+
+        return udf_p, grad_p
+
+
+
+
 
     def evaluate_mesh_value(self, data=None):
         try:
@@ -72,32 +123,37 @@ class Mesh(Evaluator):
             # fea = self.encode_network(data)
             data.pop('coords', None)
             data.pop('featurepoints', None)
+        
 
         extractor = dcudf(lambda x: self.evaluate_network(x, fea=self.encode_network(x), **data)[self.attribute],
                               self.resolution,self.threshold,bound_min=[-1,-1,-1],bound_max=[1,1,1],
                               is_cut = self.isCut,region_rate=10, laplacian_weight=50)
-        if self.another:
-            dcMesh, mesh, another_mesh = extractor.optimize()
-        else :
-            dcMesh, mesh, _ = extractor.optimize()
+                            #   ,optimize_query_func=lambda x: self.evaluate_network(x, fea=self.encode_network(x), **optimize_data)[self.attribute])
+        dcMesh, mesh, another_mesh = extractor.optimize()
+        
 
+        if not self.another:
+            another_mesh = None
+        if self.dmudf:
+            # mesh_v, mesh_f =extract_mesh_from_udf(lambda x: self.evaluate_network(x, fea=self.encode_network(x), **data)[self.attribute], device)
+            mesh_v, mesh_f = extract_mesh(lambda x: self.query_func(x, **data), lambda x: self.grad_func(x, **data))
+            dmudf_mesh = trimesh.Trimesh(vertices = mesh_v, faces = mesh_f)
+        else:
+            dmudf_mesh = None
+        
 
-        meshUDF = getMeshUDF(lambda x: self.evaluate_network(x, fea=self.encode_network(x), **data)[self.attribute],
-                             self.resolution)
+        if self.meshudf:
+            meshUDF = getMeshUDF(lambda x: self.evaluate_network(x, fea=self.encode_network(x), **data)[self.attribute],
+                                self.resolution)
+        else:
+            meshUDF = None
+        # meshUDF = None
         try:
             if not mesh.is_empty:
-                if self.another:
-                    return np.array(mesh.vertices), np.array(mesh.faces), np.array(mesh.vertex_normals),\
-                        np.array(dcMesh.vertices), np.array(dcMesh.faces), np.array(dcMesh.vertex_normals),\
-                        np.array(meshUDF.vertices), np.array(meshUDF.faces), np.array(meshUDF.vertex_normals),\
-                        np.array(another_mesh.vertices), np.array(another_mesh.faces), np.array(another_mesh.vertex_normals)
-                else :
-                    return np.array(mesh.vertices), np.array(mesh.faces), np.array(mesh.vertex_normals),\
-                            np.array(dcMesh.vertices), np.array(dcMesh.faces), np.array(dcMesh.vertex_normals),\
-                            np.array(meshUDF.vertices), np.array(meshUDF.faces), np.array(meshUDF.vertex_normals),\
-                            np.array([[0,0,0]],dtype=float),np.array([[0,0,0]],dtype=float),np.array([[0,0,0]],dtype=float)
-            return np.array([[0,0,0]],dtype=float),np.array([[0,0,0]],dtype=float),np.array([[0,0,0]],dtype=float),\
-                np.array([[0,0,0]],dtype=float),np.array([[0,0,0]],dtype=float),np.array([[0,0,0]],dtype=float)
+                return mesh, dcMesh, meshUDF, another_mesh, dmudf_mesh
+            else:
+                return None
+
         except Exception as e:
             tb = sys.exc_info()[2]
             self.runner.py_logger.error(repr(e))
@@ -116,28 +172,14 @@ class Mesh(Evaluator):
             if ("Train" in self.runner.active_task.__class__.__name__ ) and self.skip_first and epoch == 0:
                 return
             self.runner.py_logger.info(f"Generating {self.name} with resolution {self.resolution}")
-            verts, faces, _, dcVerts, dcFaces, _, meshUDFverts,meshUDFfaces, _,aVerts,aFaces,_= self.evaluate_mesh_value(data)
-            if(np.all(verts == 0) and np.all(faces == 0)):
-                self.runner.py_logger.info(f"bad udf,no mesh generated")
-                return
+            #this is plain wrong
+            #with torch.no_grad():
+            meshName = ["", "DC", "MESHUDF", "Another", "DMUDF"]
+            meshes = self.evaluate_mesh_value(data)
+            for i, mesh in enumerate(meshes):
+                if mesh is None:
+                    self.runner.py_logger.info(f"bad udf,no mesh generated")
+                    continue
+                self.runner.logger.log_mesh(self.name+meshName[i], mesh.vertices.reshape([1, -1, 3]),
+                                        mesh.faces.reshape([1, -1, 3]))
 
-            # if(self.compute_chamfer):
-            #     if(self.another):
-            #         Compute_Chamfer(trimesh.Trimesh(aVerts.astype(np.float32),aFaces),self.runner,f"{self.name}_Achamfer_{{0}}_{{1}}", True)
-            #         Compute_Chamfer(trimesh.Trimesh(verts.astype(np.float32),faces),self.runner,f"{self.name}_chamfer_{{0}}_{{1}}", True)
-            #         Compute_Chamfer(trimesh.Trimesh(meshUDFverts.astype(np.float32),meshUDFfaces),self.runner,f"{self.name}_Mchamfer_{{0}}_{{1}}", True)
-            #     else:
-            #         Compute_Chamfer(trimesh.Trimesh(verts.astype(np.float32),faces),self.runner,f"{self.name}_chamfer_{{0}}_{{1}}", True)
-            #         Compute_Chamfer(trimesh.Trimesh(meshUDFverts.astype(np.float32),meshUDFfaces),self.runner,f"{self.name}_Mchamfer_{{0}}_{{1}}", True)
-
-
-            self.runner.logger.log_mesh(self.name, verts.reshape([1, -1, 3]),
-                                        faces.reshape([1, -1, 3]))
-
-            self.runner.logger.log_mesh(self.name+"DC", dcVerts.reshape([1, -1, 3]),
-                                        dcFaces.reshape([1, -1, 3]))
-            self.runner.logger.log_mesh(self.name+"MESHUDF", meshUDFverts.reshape([1, -1, 3]),
-                                        meshUDFfaces.reshape([1, -1, 3]))
-            if self.another:
-                self.runner.logger.log_mesh(self.name+"Another", aVerts.reshape([1, -1, 3]),
-                                        aFaces.reshape([1, -1, 3]))
