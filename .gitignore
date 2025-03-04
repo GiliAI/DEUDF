@@ -10,3 +10,4 @@
 lsf.*
 /experiment
 /.idea
+runs/
